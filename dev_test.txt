@@ -1,4 +1,4 @@
 print("Something")
-
+print("New something")
 
 
