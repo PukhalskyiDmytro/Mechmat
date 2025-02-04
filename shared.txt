@@ -1,1 +1,2 @@
 Hello from feature3!
+Final changes from feature3
