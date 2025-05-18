@@ -3,23 +3,19 @@ from tkinter import messagebox
 from math import cos, sin, radians, sqrt
 from abc import ABC, abstractmethod
 
-from sympy.physics.units import velocity
-
 WIDTH = 800
 HEIGHT = 600
 g = 9.81
 TIME_STEP = 0.0075
+SPEED = 0.1
+ROTATION_SPEED = 0.001
+ADD_POWER_SPEED = 1.01
 
 def sign(x):
     return (x > 0) - (x < 0)
 
 def dot(v1: complex, v2: complex) -> float:
-    return (v1.real * v2.real + v1.imag * v2.imag)
-
-def cross(v1: complex, v2: complex):
-    x1, y1 = v1.real, v1.imag
-    x2, y2 = v2.real, v2.imag
-    return x1 * y2 - y1 * x2
+    return v1.real * v2.real + v1.imag * v2.imag
 
 def normalize(v: complex) -> complex:
     if abs(v) == 0:
@@ -56,13 +52,10 @@ class Collision(Object):
             self.objects_that_overlap.append(another)
 
 class GameObject(Object):
-    id = 0
     def __init__(self, position, velocity, size, color="gray"):
         self.color = color
         self.velocity = velocity
         self.collision = Collision(position, size)
-        self.id = GameObject.id
-        GameObject.id += 1
         super().__init__(position, size)
 
     @abstractmethod
@@ -94,7 +87,7 @@ class Projectile(GameObject):
 
         super().__init__(position, velocity, complex(radius, radius), color)
 
-    def update(self):
+    def update(self, **kwargs):
         dx = self.velocity.real * self.time_elapsed
         dy = self.velocity.imag * self.time_elapsed - (g * self.time_elapsed ** 2) / 2
 
@@ -117,28 +110,43 @@ class Projectile(GameObject):
         canvas.create_oval(x0, y0, x1, y1, fill=self.color)
 
 class Tank(GameObject):
-    def __init__(self, position, velocity = complex(0,0), trajectory = complex(0, 4), color="gray", size = complex(30, 30)):
+    def __init__(self, position, velocity = complex(0,0), trajectory = complex(0, 4),
+                 color="gray", size = complex(30, 30), **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
         self.trajectory = trajectory
         self.time_in_air = 0
+        self.time_from_last_shot = 1
         super().__init__(position, velocity, size, color)
 
-    def change_trajectory(self, event):
-        if event.keysym == "w" or event.keysym == "s":
-            a = radians(3) if event.keysym == "s" else radians(-3)
-            self.trajectory *= complex(cos(a), sin(a))
-        else:
-            self.trajectory *= 21 / 22 if event.keysym == "Down" else 22 / 21
+    def keyboard_interrupt(self, pressed_keys):
+        result = None
 
-    def change_velocity(self, event):
-        self.velocity = 1 if event.keysym == "d" else -1
+        if self.fire_key in pressed_keys:
+            if self.time_from_last_shot >= 1:
+                norm_trajectory = self.trajectory / sqrt(self.trajectory.real ** 2 + self.trajectory.imag ** 2) * 100
+                print(self.trajectory)
+                self.time_from_last_shot = 0
+                return Projectile(position=self.position + norm_trajectory, velocity=self.trajectory, color=self.color)
 
-    def fire(self):
-        norm_trajectory = self.trajectory / sqrt(self.trajectory.real ** 2 + self.trajectory.imag ** 2) * 100
-        return Projectile(position=self.position + norm_trajectory, velocity=self.trajectory, color=self.color)
+        if self.forward_key in pressed_keys:
+            self.velocity = SPEED
+        if self.back_key in pressed_keys:
+            self.velocity = -SPEED
+        if self.up_key in pressed_keys:
+            self.trajectory *= complex(cos(ROTATION_SPEED), sin(ROTATION_SPEED))
+        if self.down_key in pressed_keys:
+            self.trajectory *= complex(cos(ROTATION_SPEED), -sin(ROTATION_SPEED))
+        if self.more_power_key in pressed_keys:
+            self.trajectory *= ADD_POWER_SPEED
+        if self.less_power_key in pressed_keys:
+            self.trajectory *= 1/ADD_POWER_SPEED
+
+        return result
 
     def update(self):
         self.time_in_air += TIME_STEP
-        self.velocity -= complex(0, (g * self.time_in_air ** 2) / 2)
 
         for another in self.collision.objects_that_overlap:
             if isinstance(another, Projectile):
@@ -147,35 +155,34 @@ class Tank(GameObject):
                 for obstacle in self.collision.objects_that_overlap:
                     obstacle_dir = complex(0, 0)
 
-                    dx = obstacle.position.real - self.position.real
-                    dy = obstacle.position.imag - self.position.imag
-                    half_width = self.size.real
-                    half_height = self.size.imag
+                    x_in_range = self.position.real - self.size.real <= obstacle.position.real <= self.position.real + self.size.real
+                    y_in_range = self.position.imag - self.size.imag <= obstacle.position.imag <= self.position.imag + self.size.imag
 
-                    if -half_width <= dx <= half_width:
-                        obstacle_dir = complex(0, 1 if dy >= 0 else -1)
-                    elif -half_height <= dy <= half_height:
-                        obstacle_dir = complex(1 if dx >= 0 else -1, 0)
-                    elif dy > half_height:
-                        obstacle_dir = complex(
-                            1 if dx > half_width >= obstacle.size.real else -1 if dx <= half_width and obstacle.size.real <= half_width else 0,
-                            1
-                        )
+                    if x_in_range:
+                        obstacle_dir = complex(0, 1 if obstacle.position.imag >= self.position.imag else -1)
+                    elif y_in_range:
+                        obstacle_dir = complex(1 if obstacle.position.real >= self.position.real else -1, 0)
                     else:
-                        obstacle_dir = complex(
-                            1 if dx > half_width >= obstacle.size.real else -1 if obstacle.size.real <= half_width else 0,
-                            -1 if dx <= half_width < obstacle.size.real else 0
-                        )
+                        right = obstacle.position.real > self.position.real + self.size.real
+                        smaller = obstacle.size.real <= self.size.real
+
+                        if right:
+                            obstacle_dir = complex(1, 0) if smaller else complex(0, -1)
+                        else:
+                            obstacle_dir = complex(0, -1) if obstacle.size.real > self.size.real else complex(-1, 0)
 
                     if obstacle_dir == complex(0, -1):
                         self.velocity = self.velocity.real
+                        self.time_in_air = 0
                     elif dot(self.velocity, obstacle_dir) >= 0:
                         self.velocity = self.velocity.imag
 
+        self.velocity -= complex(0, (g * self.time_in_air ** 2) / 2)
         self.position += self.velocity
         self.velocity = 0
         self.collision.position = self.position
         self.collision.update()
+        self.time_from_last_shot += TIME_STEP
 
     def draw(self, canvas):
         canvas.create_rectangle(self.position.real - self.size.real, HEIGHT - self.position.imag - self.size.imag,
@@ -191,55 +198,47 @@ class Tank(GameObject):
 class GameController:
     def __init__(self):
         self.root = tk.Tk()
+
         self.canvas = tk.Canvas(self.root, width=WIDTH, height=HEIGHT, bg='lightblue')
         self.canvas.pack()
 
-        self.objects: list[GameObject] = [Tank(complex(600, 200), color="blue"),
-                        Tank(complex(200, 200), color="orange"),
-                        Rectangle(complex(200,100), complex(100, 25), color="sienna"),
-                        Rectangle(complex(600,100), complex(100, 25), color="sienna"),
-                        Rectangle(complex(525, 205), complex(25, 25), color="sienna"),
-                        Rectangle(complex(400,250), complex(25, 100), color="sienna")]
+        self.first_player = Tank(complex(200, 200), color="blue",
+                                 fire_key="Shift_L", forward_key="d", back_key="a", more_power_key="r",
+                                 less_power_key="f", up_key="w", down_key="s")
+        self.second_player = Tank(complex(600, 200), color="orange",
+                                  fire_key="j", forward_key = "Right", back_key = "Left", more_power_key="u",
+                                  less_power_key = "j", up_key="Down", down_key = "Up")
 
-        self.current_player_id = 0
+        self.objects: list[GameObject] = [self.first_player, self.second_player]
 
-        self.bind_keys()
+        self.pressed_keys = set()
+        self.is_running = False
 
-    def bind_keys(self):
-        self.root.bind("<Left>", self.on_keyboard_interrupt)
-        self.root.bind("<Right>", self.on_keyboard_interrupt)
-        self.root.bind("<Up>", self.on_keyboard_interrupt)
-        self.root.bind("<Down>", self.on_keyboard_interrupt)
-        self.root.bind("<f>", self.on_keyboard_interrupt)
-        self.root.bind("<a>", self.on_keyboard_interrupt)
-        self.root.bind("<d>", self.on_keyboard_interrupt)
-        self.root.bind("<w>", self.on_keyboard_interrupt)
-        self.root.bind("<s>", self.on_keyboard_interrupt)
-        self.root.bind("<u>", self.on_keyboard_interrupt)
+        self.root.bind("<KeyPress>", self.on_key_press)
+        self.root.bind("<KeyRelease>", self.on_key_release)
 
-    def get_players(self):
-        players = [i for i, obj in enumerate(self.objects) if isinstance(obj, Tank)]
-        return players
+    def on_key_press(self, event):
+        self.pressed_keys.add(event.keysym)
 
-    def on_keyboard_interrupt(self, event):
-        if event.keysym == "f":
-            self.objects.append(self.objects[self.current_player_id].fire())
-
-            current_players = self.get_players()
-            after_current = [i for i in current_players if i > self.current_player_id]
-            self.current_player_id = min(after_current) if after_current else min(current_players)
-
-        elif event.keysym == "a" or event.keysym == "d":
-            self.objects[self.current_player_id].change_velocity(event)
-        elif event.keysym == "u":
-            pass
-        else:
-            self.objects[self.current_player_id].change_trajectory(event)
+    def on_key_release(self, event):
+        self.pressed_keys.discard(event.keysym)
 
     def update(self):
         self.canvas.delete('all')
+        self.objects = [obj for obj in self.objects if obj.is_active]
+
+        r1 = self.first_player.keyboard_interrupt(self.pressed_keys)
+        r2 = self.second_player.keyboard_interrupt(self.pressed_keys)
+
+        if r1 is not None:
+            self.objects.append(r1)
+        if r2 is not None:
+            self.objects.append(r2)
 
         for i in range(len(self.objects)):
+            self.objects[i].update()
+            self.objects[i].draw(self.canvas)
+
             for j in range(i + 1, len(self.objects)):
                 obj1 = self.objects[i]
                 obj2 = self.objects[j]
@@ -247,18 +246,36 @@ class GameController:
                 obj1.collision.check_hit(obj2)
                 obj2.collision.check_hit(obj1)
 
-            self.objects[i].update()
-            self.objects[i].draw(self.canvas)
+            if not (self.objects[i].position.imag > 0 and 0 < self.objects[i].position.real < WIDTH):
+                self.objects[i].is_active = False
 
-        if len(self.get_players()) <= 1:
-            self.root.destroy()
+            if self.objects[i].is_active == False and isinstance(self.objects[i], Tank):
+                self.game_over()
 
-        self.objects = [obj for obj in self.objects if (obj.is_active and obj.position.imag > 0 and 0 < obj.position.real < WIDTH)]
-        self.root.after(1, self.update)
+        if self.is_running:
+            self.root.after(1, self.update)
+
+    def add_game_object(self, obj: GameObject):
+        self.objects.append(obj)
+
+    def extend_game_objects(self, objs: list[GameObject]):
+        self.objects.extend(objs)
 
     def run(self):
+        self.is_running = True
         self.update()
         self.root.mainloop()
 
+    def game_over(self):
+        self.is_running = False
+        text = f"Game Over! {"First" if self.first_player.is_active == True else "Second"} tank wins!"
+        self.canvas.create_text(WIDTH // 2, HEIGHT // 2-100,
+                                text=text, fill="black", font=("Arial", 24))
+
 if __name__ == '__main__':
-    GameController().run()
+    c = GameController()
+    c.extend_game_objects([ Rectangle(complex(200,100), complex(100, 25), color="sienna"),
+                            Rectangle(complex(600,100), complex(100, 25), color="sienna"),
+                            Rectangle(complex(525, 225), complex(25, 25), color="sienna"),
+                            Rectangle(complex(400,250), complex(25, 100), color="sienna")])
+    c.run()
