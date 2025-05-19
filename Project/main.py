@@ -2,16 +2,16 @@ from tkinter import PhotoImage
 import tkinter as tk
 from math import cos, sin, atan2, degrees
 from abc import ABC, abstractmethod
-from PIL import Image, ImageTk
 
 WIDTH = 800
 HEIGHT = 600
 g = 9.81
 TIME_STEP = 0.0075
-SPEED = 0.2
-ROTATION_SPEED = 0.004
-ADD_POWER_SPEED = 1.005
+SPEED = 0.5
+ROTATION_SPEED = 0.005
+ADD_POWER_SPEED = 1.0075
 MAX_POWER = 15
+TIME_BETWEEN_SHOTS = 0.8
 
 def angle_from_vector(vector: complex):
     x, y = vector.real, vector.imag
@@ -104,7 +104,7 @@ class Projectile(GameObject):
         self.collision.position = self.position
 
         for another in self.collision.objects_that_overlap:
-            if isinstance(another, Rectangle):
+            if isinstance(another, Rectangle) or isinstance(another, Projectile):
                 self.is_active = False
 
         self.collision.update()
@@ -119,7 +119,7 @@ class Projectile(GameObject):
 
 class Tank(GameObject):
     def __init__(self, position, direction = complex(0,0), trajectory = complex(0, 4),
-                 color="gray", size = complex(36, 31), is_first=True, **kwargs):
+                 color="gray", size = complex(40, 30), is_first=True, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -135,7 +135,7 @@ class Tank(GameObject):
         result = None
 
         if self.fire_key in pressed_keys:
-            if self.time_from_last_shot >= 1:
+            if self.time_from_last_shot >= TIME_BETWEEN_SHOTS:
                 self.time_from_last_shot = 0
                 return Projectile(position=self.position + normalize(self.trajectory)*100+complex(0, 15), direction=self.trajectory, color=self.color)
 
@@ -197,13 +197,13 @@ class Tank(GameObject):
 
     def draw(self, canvas):
         canvas.create_line(self.position.real, HEIGHT-self.position.imag-15, (self.position+normalize(self.trajectory)*100).real,
-                           HEIGHT-(self.position+normalize(self.trajectory)*100).imag-15, width=3, fill="gray25")
+                           HEIGHT-(self.position+normalize(self.trajectory)*100).imag-15, width=3, fill=self.color)
 
-        canvas.create_image(self.position.real, HEIGHT-self.position.imag, image=self.tank_sprite)#
+        canvas.create_image(self.position.real+4, HEIGHT-self.position.imag, image=self.tank_sprite)
 
         for i in range(int(abs(self.trajectory) * 4) // MAX_POWER+1):
-            cx = 50 if self.is_first else WIDTH - 50
-            cy = 50 + i * 20
+            cx = 50 + i * 20 if self.is_first else WIDTH - (50 + i * 20)
+            cy = 50
             canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill=self.color)
 
 class GameController:
@@ -216,10 +216,10 @@ class GameController:
         self.canvas = tk.Canvas(self.root, width=WIDTH, height=HEIGHT, bg='lightblue')
         self.canvas.pack()
 
-        self.first_player = Tank(complex(200, 400), color="blue",
+        self.first_player = Tank(complex(300, 400), color="navy",
                                  fire_key="Shift_L", forward_key="d", back_key="a", more_power_key="r",
                                  less_power_key="f", up_key="w", down_key="s")
-        self.second_player = Tank(complex(600, 400), color="orange", is_first = False,
+        self.second_player = Tank(complex(500, 400), color="deep pink", is_first = False,
                                   fire_key="j", forward_key = "Right", back_key = "Left", more_power_key="i",
                                   less_power_key = "k", up_key="Down", down_key = "Up")
 
@@ -282,22 +282,22 @@ class GameController:
 
     def game_over(self):
         self.is_running = False
-        text = f"Game Over! {"First" if self.first_player.is_active == True else "Second"} tank wins!"
+        text = f"Game Over! {self.first_player.color.upper() if self.first_player.is_active == True else self.second_player.color.upper()} tank wins!"
         self.canvas.create_text(WIDTH // 2, 100,
                                 text=text, fill="black", font=("Arial", 24), )
 
 if __name__ == '__main__':
     c = GameController()
     c.extend_game_objects([ Rectangle(complex(400, 360), complex(50, 100)),
-                            Rectangle(complex(400, 230), complex(50, 30)),
-                            Rectangle(complex(300, 200), complex(25, 50)),
-                            Rectangle(complex(300, 100), complex(25, 30)),
-                            Rectangle(complex(500, 100), complex(25, 30)),
-                            Rectangle(complex(500, 200), complex(25, 50)),
-                            Rectangle(complex(400, 275), complex(175, 60)),
-                            Rectangle(complex(175, 75), complex(150, 10)),
-                            Rectangle(complex(625, 75), complex(150, 10)),
-                            Rectangle(complex(125, 450), complex(100, 10)),
-                            Rectangle(complex(800-125, 450), complex(100, 10))
+                            Rectangle(complex(400, 260), complex(50, 50)),
+                            Rectangle(complex(300, 230), complex(25, 50)),
+                            Rectangle(complex(300, 100), complex(25, 35)),
+                            Rectangle(complex(500, 100), complex(25, 35)),
+                            Rectangle(complex(500, 230), complex(25, 50)),
+                            Rectangle(complex(400, 275), complex(225, 50)),
+                            Rectangle(complex(125, 450), complex(100, 30)),
+                            Rectangle(complex(800-125, 450), complex(100, 30)),
+                            Rectangle(complex(175, 75), complex(150, 30)),
+                            Rectangle(complex(625, 75), complex(150, 30)),
                             ])
     c.run()
